@@ -1,9 +1,9 @@
 {
-    "name": "confirm-it-solutions/php-zabbix-api",
+    "name": "llnw/php-zabbix-api",
     "type": "library",
     "description": "PhpZabbixApi library",
     "keywords": ["zabbix","api"],
-    "homepage": "http://github.com/confirm-it-solutions/PhpZabbixApi",
+    "homepage": "http://github.com/llnw/PhpZabbixApi",
     "license": "MIT",
     "authors": [
         {
