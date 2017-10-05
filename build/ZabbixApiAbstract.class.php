@@ -169,12 +169,16 @@ abstract class ZabbixApiAbstract
      * @param   $httpPassword   Password for HTTP basic authorization.
      * @param   $authToken      Already issued auth token (e.g. extracted from cookies)
      * @param   $sslContext     SSL context for SSL-enabled connections
+     * @param   $cacheDir       Zabbix API cache location
      */
 
-    public function __construct($apiUrl='', $user='', $password='', $httpUser='', $httpPassword='', $authToken='', $sslContext=NULL)
+    public function __construct($apiUrl='', $user='', $password='', $httpUser='', $httpPassword='', $authToken='', $sslContext=NULL, $cacheDir=NULL)
     {
-        if (empty($this->cacheLocation) || ($this->cacheLocation) == null) {
+
+        if (empty($cacheDir) || ($cacheDir) == null) {
             $this->cacheLocation = sys_get_temp_dir();
+        } else {
+            $this->cacheLocation = $cacheDir;
         }
 
         if($apiUrl)
@@ -296,7 +300,7 @@ abstract class ZabbixApiAbstract
     public function setCacheLocation($path)
     {
         $this->cacheLocation = $path;
-	$this->cachePathFull = $this->cacheLocation . DIRECTORY_SEPARATOR . self::CACHE_DIR_NAME;
+        $this->cachePathFull = $this->cacheLocation . DIRECTORY_SEPARATOR . self::CACHE_DIR_NAME;
 
         return $this;
     }
