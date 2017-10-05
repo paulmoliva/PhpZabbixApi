@@ -296,6 +296,7 @@ abstract class ZabbixApiAbstract
     public function setCacheLocation($path)
     {
         $this->cacheLocation = $path;
+	$this->cachePathFull = $this->cacheLocation . DIRECTORY_SEPARATOR . self::CACHE_DIR_NAME;
 
         return $this;
     }
