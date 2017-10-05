@@ -58,6 +58,32 @@ class Exception extends \Exception
 
 abstract class ZabbixApiAbstract
 {
+    /**
+     * Zabbix files cache location
+     * @var string
+     */
+    private $cacheLocation = null;
+
+
+    /**
+     * Full cache path
+     * @var string
+     */
+    private $cachePathFull = null;
+
+
+    /**
+     * Auth token cache file location
+     * @var null
+     */
+    private $authTokenCacheFile = null;
+
+
+    /**
+     * Zabbix cache folder name
+     */
+    const CACHE_DIR_NAME = 'zabbix-api';
+
 
     /**
      * @brief   Anonymous API functions.
@@ -147,6 +173,10 @@ abstract class ZabbixApiAbstract
 
     public function __construct($apiUrl='', $user='', $password='', $httpUser='', $httpPassword='', $authToken='', $sslContext=NULL)
     {
+        if (empty($this->cacheLocation) || ($this->cacheLocation) == null) {
+            $this->cacheLocation = sys_get_temp_dir();
+        }
+
         if($apiUrl)
             $this->setApiUrl($apiUrl);
 
@@ -160,6 +190,44 @@ abstract class ZabbixApiAbstract
             $this->setAuthToken($authToken);
         elseif($user && $password)
             $this->userLogin(array('user' => $user, 'password' => $password));
+    }
+
+    /**
+     * Returns full path for Zabbix cache
+     * @return string
+     */
+    protected function getZabbixCachePath()
+    {
+        if (empty($this->cachePathFull) || ($this->cachePathFull == null)) {
+            $this->cachePathFull = $this->cacheLocation . DIRECTORY_SEPARATOR . self::CACHE_DIR_NAME;
+        }
+
+        return $this->cachePathFull;
+    }
+
+
+    /**
+     * @return $this
+     */
+    protected function checkCachePath()
+    {
+        $cachePathFull = $this->getZabbixCachePath();
+
+        if (!file_exists($cachePathFull) || !is_dir($cachePathFull)) {
+            mkdir($cachePathFull, 0777, true);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Returns full path of token cache file
+     * @param $params
+     * @return string
+     */
+    protected function getTokenCachePath(array $params) {
+        $tokenCacheDir = $this->getZabbixCachePath();
+        return $tokenCacheDir.'/.zabbixapi-token-'.md5($params['user'].'|'.posix_getuid());
     }
 
     /**
@@ -216,6 +284,18 @@ abstract class ZabbixApiAbstract
             $this->extraHeaders = 'Authorization: Basic ' . base64_encode($user.':'.$password);
         else
             $this->extraHeaders = '';
+
+        return $this;
+    }
+
+    /**
+     * @brief Sets the cache directory
+     * @param $path string Cache folder location
+     * @return $this
+     */
+    public function setCacheLocation($path)
+    {
+        $this->cacheLocation = $path;
 
         return $this;
     }
@@ -481,7 +561,7 @@ abstract class ZabbixApiAbstract
      *
      * @param   $params             Parameters to pass through.
      * @param   $arrayKeyProperty   Object property for key of array.
-     * @param   $tokenCacheDir      Path to a directory to store the auth token.
+     * @param   $tokenCacheDir      Path to a directory to store the auth token. [DEPRECATED]
      *
      * @retval  stdClass
      *
@@ -493,9 +573,11 @@ abstract class ZabbixApiAbstract
         // reset auth token
         $this->authToken = '';
 
+        $tokenCacheDir = $this->getZabbixCachePath();
+
         // build filename for cached auth token
         if($tokenCacheDir && array_key_exists('user', $params) && is_dir($tokenCacheDir))
-            $tokenCacheFile = $tokenCacheDir.'/.zabbixapi-token-'.md5($params['user'].'|'.posix_getuid());
+            $tokenCacheFile = $this->getTokenCachePath($params);
 
         // try to read cached auth token
         if(isset($tokenCacheFile) && is_file($tokenCacheFile))
@@ -510,7 +592,13 @@ abstract class ZabbixApiAbstract
             {
                 // user.get failed, token invalid so reset it and remove file
                 $this->authToken = '';
-                unlink($tokenCacheFile);
+
+                try {
+                    unlink($tokenCacheFile);
+                } catch (Exception $ex) {
+                    // Nothing
+                    $this->authToken = '';
+                }
             }
         }
 
@@ -525,7 +613,7 @@ abstract class ZabbixApiAbstract
             if(isset($tokenCacheFile))
             {
                 file_put_contents($tokenCacheFile, $this->authToken);
-                chmod($tokenCacheFile, 0600);
+                chmod($tokenCacheFile, 0777); // Was: 600
             }
         }
 
@@ -562,7 +650,7 @@ abstract class ZabbixApiAbstract
         return $response;
     }
 
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method api.tableName.
@@ -595,7 +683,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('api.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method api.pk.
@@ -628,7 +716,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('api.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method api.pkOption.
@@ -661,7 +749,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('api.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.get.
@@ -694,7 +782,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.exists.
@@ -727,7 +815,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.create.
@@ -760,7 +848,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.update.
@@ -793,7 +881,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.delete.
@@ -826,7 +914,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.validateOperationsIntegrity.
@@ -859,7 +947,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.validateOperationsIntegrity', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.validateOperationConditions.
@@ -892,7 +980,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.validateOperationConditions', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.validateCreate.
@@ -925,7 +1013,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.validateCreate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.validateUpdate.
@@ -958,7 +1046,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.validateUpdate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.tableName.
@@ -991,7 +1079,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.pk.
@@ -1024,7 +1112,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method action.pkOption.
@@ -1057,7 +1145,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('action.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method alert.get.
@@ -1090,7 +1178,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('alert.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method alert.tableName.
@@ -1123,7 +1211,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('alert.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method alert.pk.
@@ -1156,7 +1244,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('alert.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method alert.pkOption.
@@ -1189,7 +1277,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('alert.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method apiinfo.version.
@@ -1222,7 +1310,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('apiinfo.version', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method apiinfo.tableName.
@@ -1255,7 +1343,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('apiinfo.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method apiinfo.pk.
@@ -1288,7 +1376,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('apiinfo.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method apiinfo.pkOption.
@@ -1321,7 +1409,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('apiinfo.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.get.
@@ -1354,7 +1442,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.exists.
@@ -1387,7 +1475,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.checkInput.
@@ -1420,7 +1508,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.checkInput', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.create.
@@ -1453,7 +1541,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.update.
@@ -1486,7 +1574,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.delete.
@@ -1519,7 +1607,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.massAdd.
@@ -1552,7 +1640,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.massAdd', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.tableName.
@@ -1585,7 +1673,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.pk.
@@ -1618,7 +1706,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method application.pkOption.
@@ -1651,7 +1739,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('application.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method configuration.export.
@@ -1684,7 +1772,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('configuration.export', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method configuration.import.
@@ -1717,7 +1805,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('configuration.import', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method configuration.tableName.
@@ -1750,7 +1838,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('configuration.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method configuration.pk.
@@ -1783,7 +1871,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('configuration.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method configuration.pkOption.
@@ -1816,7 +1904,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('configuration.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dcheck.get.
@@ -1849,7 +1937,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dcheck.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dcheck.isReadable.
@@ -1882,7 +1970,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dcheck.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dcheck.isWritable.
@@ -1915,7 +2003,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dcheck.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dcheck.tableName.
@@ -1948,7 +2036,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dcheck.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dcheck.pk.
@@ -1981,7 +2069,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dcheck.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dcheck.pkOption.
@@ -2014,7 +2102,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dcheck.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dhost.get.
@@ -2047,7 +2135,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dhost.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dhost.exists.
@@ -2080,7 +2168,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dhost.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dhost.tableName.
@@ -2113,7 +2201,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dhost.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dhost.pk.
@@ -2146,7 +2234,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dhost.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dhost.pkOption.
@@ -2179,7 +2267,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dhost.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.get.
@@ -2212,7 +2300,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.exists.
@@ -2245,7 +2333,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.create.
@@ -2278,7 +2366,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.update.
@@ -2311,7 +2399,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.delete.
@@ -2344,7 +2432,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.copy.
@@ -2377,7 +2465,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.copy', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.syncTemplates.
@@ -2410,7 +2498,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.isReadable.
@@ -2443,7 +2531,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.isWritable.
@@ -2476,7 +2564,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.findInterfaceForItem.
@@ -2509,7 +2597,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.findInterfaceForItem', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.tableName.
@@ -2542,7 +2630,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.pk.
@@ -2575,7 +2663,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method discoveryrule.pkOption.
@@ -2608,7 +2696,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('discoveryrule.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.get.
@@ -2641,7 +2729,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.exists.
@@ -2674,7 +2762,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.checkInput.
@@ -2707,7 +2795,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.checkInput', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.create.
@@ -2740,7 +2828,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.update.
@@ -2773,7 +2861,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.delete.
@@ -2806,7 +2894,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.isReadable.
@@ -2839,7 +2927,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.isWritable.
@@ -2872,7 +2960,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.tableName.
@@ -2905,7 +2993,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.pk.
@@ -2938,7 +3026,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method drule.pkOption.
@@ -2971,7 +3059,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('drule.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dservice.get.
@@ -3004,7 +3092,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dservice.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dservice.exists.
@@ -3037,7 +3125,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dservice.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dservice.tableName.
@@ -3070,7 +3158,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dservice.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dservice.pk.
@@ -3103,7 +3191,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dservice.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method dservice.pkOption.
@@ -3136,7 +3224,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('dservice.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method event.get.
@@ -3169,7 +3257,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('event.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method event.acknowledge.
@@ -3202,7 +3290,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('event.acknowledge', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method event.tableName.
@@ -3235,7 +3323,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('event.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method event.pk.
@@ -3268,7 +3356,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('event.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method event.pkOption.
@@ -3301,7 +3389,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('event.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.get.
@@ -3334,7 +3422,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.syncTemplates.
@@ -3367,7 +3455,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.delete.
@@ -3400,7 +3488,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.update.
@@ -3433,7 +3521,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.create.
@@ -3466,7 +3554,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.exists.
@@ -3499,7 +3587,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.getObjects.
@@ -3532,7 +3620,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.tableName.
@@ -3565,7 +3653,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.pk.
@@ -3598,7 +3686,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graph.pkOption.
@@ -3631,7 +3719,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graph.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphitem.get.
@@ -3664,7 +3752,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphitem.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphitem.tableName.
@@ -3697,7 +3785,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphitem.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphitem.pk.
@@ -3730,7 +3818,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphitem.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphitem.pkOption.
@@ -3763,7 +3851,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphitem.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.get.
@@ -3796,7 +3884,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.syncTemplates.
@@ -3829,7 +3917,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.delete.
@@ -3862,7 +3950,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.update.
@@ -3895,7 +3983,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.create.
@@ -3928,7 +4016,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.exists.
@@ -3961,7 +4049,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.getObjects.
@@ -3994,7 +4082,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.tableName.
@@ -4027,7 +4115,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.pk.
@@ -4060,7 +4148,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method graphprototype.pkOption.
@@ -4093,7 +4181,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('graphprototype.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.get.
@@ -4126,7 +4214,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.getObjects.
@@ -4159,7 +4247,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.exists.
@@ -4192,7 +4280,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.create.
@@ -4225,7 +4313,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.update.
@@ -4258,7 +4346,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.massAdd.
@@ -4291,7 +4379,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.massAdd', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.massUpdate.
@@ -4324,7 +4412,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.massUpdate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.massRemove.
@@ -4357,7 +4445,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.massRemove', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.delete.
@@ -4390,7 +4478,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.isReadable.
@@ -4423,7 +4511,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.isWritable.
@@ -4456,7 +4544,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.tableName.
@@ -4489,7 +4577,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.pk.
@@ -4522,7 +4610,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method host.pkOption.
@@ -4555,7 +4643,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('host.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.get.
@@ -4588,7 +4676,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.getObjects.
@@ -4621,7 +4709,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.exists.
@@ -4654,7 +4742,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.create.
@@ -4687,7 +4775,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.update.
@@ -4720,7 +4808,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.delete.
@@ -4753,7 +4841,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.massAdd.
@@ -4786,7 +4874,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.massAdd', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.massRemove.
@@ -4819,7 +4907,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.massRemove', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.massUpdate.
@@ -4852,7 +4940,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.massUpdate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.isReadable.
@@ -4885,7 +4973,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.isWritable.
@@ -4918,7 +5006,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.tableName.
@@ -4951,7 +5039,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.pk.
@@ -4984,7 +5072,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostgroup.pkOption.
@@ -5017,7 +5105,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostgroup.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.get.
@@ -5050,7 +5138,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.create.
@@ -5083,7 +5171,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.update.
@@ -5116,7 +5204,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.syncTemplates.
@@ -5149,7 +5237,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.delete.
@@ -5182,7 +5270,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.isReadable.
@@ -5215,7 +5303,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.isWritable.
@@ -5248,7 +5336,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.tableName.
@@ -5281,7 +5369,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.pk.
@@ -5314,7 +5402,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostprototype.pkOption.
@@ -5347,7 +5435,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostprototype.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method history.get.
@@ -5380,7 +5468,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('history.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method history.tableName.
@@ -5413,7 +5501,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('history.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method history.pk.
@@ -5446,7 +5534,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('history.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method history.pkOption.
@@ -5479,7 +5567,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('history.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.get.
@@ -5512,7 +5600,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.exists.
@@ -5545,7 +5633,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.checkInput.
@@ -5578,7 +5666,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.checkInput', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.create.
@@ -5611,7 +5699,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.update.
@@ -5644,7 +5732,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.delete.
@@ -5677,7 +5765,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.massAdd.
@@ -5710,7 +5798,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.massAdd', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.massRemove.
@@ -5743,7 +5831,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.massRemove', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.replaceHostInterfaces.
@@ -5776,7 +5864,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.replaceHostInterfaces', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.tableName.
@@ -5809,7 +5897,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.pk.
@@ -5842,7 +5930,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method hostinterface.pkOption.
@@ -5875,7 +5963,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('hostinterface.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.get.
@@ -5908,7 +5996,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.getObjects.
@@ -5941,7 +6029,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.exists.
@@ -5974,7 +6062,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.create.
@@ -6007,7 +6095,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.update.
@@ -6040,7 +6128,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.delete.
@@ -6073,7 +6161,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.tableName.
@@ -6106,7 +6194,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.pk.
@@ -6139,7 +6227,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method image.pkOption.
@@ -6172,7 +6260,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('image.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.get.
@@ -6205,7 +6293,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.create.
@@ -6238,7 +6326,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.update.
@@ -6271,7 +6359,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.delete.
@@ -6304,7 +6392,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.isReadable.
@@ -6337,7 +6425,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.isWritable.
@@ -6370,7 +6458,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.tableName.
@@ -6403,7 +6491,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.pk.
@@ -6436,7 +6524,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method iconmap.pkOption.
@@ -6469,7 +6557,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('iconmap.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.get.
@@ -6502,7 +6590,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.getObjects.
@@ -6535,7 +6623,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.exists.
@@ -6568,7 +6656,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.create.
@@ -6601,7 +6689,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.update.
@@ -6634,7 +6722,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.delete.
@@ -6667,7 +6755,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.syncTemplates.
@@ -6700,7 +6788,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.validateInventoryLinks.
@@ -6733,7 +6821,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.validateInventoryLinks', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.addRelatedObjects.
@@ -6766,7 +6854,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.addRelatedObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.findInterfaceForItem.
@@ -6799,7 +6887,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.findInterfaceForItem', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.isReadable.
@@ -6832,7 +6920,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.isWritable.
@@ -6865,7 +6953,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.tableName.
@@ -6898,7 +6986,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.pk.
@@ -6931,7 +7019,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method item.pkOption.
@@ -6964,7 +7052,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('item.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.get.
@@ -6997,7 +7085,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.exists.
@@ -7030,7 +7118,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.create.
@@ -7063,7 +7151,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.update.
@@ -7096,7 +7184,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.delete.
@@ -7129,7 +7217,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.syncTemplates.
@@ -7162,7 +7250,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.addRelatedObjects.
@@ -7195,7 +7283,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.addRelatedObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.findInterfaceForItem.
@@ -7228,7 +7316,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.findInterfaceForItem', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.isReadable.
@@ -7261,7 +7349,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.isWritable.
@@ -7294,7 +7382,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.tableName.
@@ -7327,7 +7415,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.pk.
@@ -7360,7 +7448,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method itemprototype.pkOption.
@@ -7393,7 +7481,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('itemprototype.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.get.
@@ -7426,7 +7514,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.exists.
@@ -7459,7 +7547,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.create.
@@ -7492,7 +7580,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.update.
@@ -7525,7 +7613,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.delete.
@@ -7558,7 +7646,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.tableName.
@@ -7591,7 +7679,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.pk.
@@ -7624,7 +7712,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method maintenance.pkOption.
@@ -7657,7 +7745,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('maintenance.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.get.
@@ -7690,7 +7778,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.getObjects.
@@ -7723,7 +7811,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.exists.
@@ -7756,7 +7844,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.checkInput.
@@ -7789,7 +7877,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.checkInput', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.create.
@@ -7822,7 +7910,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.update.
@@ -7855,7 +7943,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.delete.
@@ -7888,7 +7976,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.isReadable.
@@ -7921,7 +8009,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.isWritable.
@@ -7954,7 +8042,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.checkCircleSelementsLink.
@@ -7987,7 +8075,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.checkCircleSelementsLink', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.tableName.
@@ -8020,7 +8108,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.pk.
@@ -8053,7 +8141,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method map.pkOption.
@@ -8086,7 +8174,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('map.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.get.
@@ -8119,7 +8207,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.create.
@@ -8152,7 +8240,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.update.
@@ -8185,7 +8273,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.delete.
@@ -8218,7 +8306,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.tableName.
@@ -8251,7 +8339,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.pk.
@@ -8284,7 +8372,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method mediatype.pkOption.
@@ -8317,7 +8405,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('mediatype.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.get.
@@ -8350,7 +8438,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.create.
@@ -8383,7 +8471,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.update.
@@ -8416,7 +8504,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.delete.
@@ -8449,7 +8537,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.isReadable.
@@ -8482,7 +8570,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.isWritable.
@@ -8515,7 +8603,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.tableName.
@@ -8548,7 +8636,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.pk.
@@ -8581,7 +8669,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method proxy.pkOption.
@@ -8614,7 +8702,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('proxy.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.get.
@@ -8647,7 +8735,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.create.
@@ -8680,7 +8768,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.validateUpdate.
@@ -8713,7 +8801,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.validateUpdate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.update.
@@ -8746,7 +8834,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.validateDelete.
@@ -8779,7 +8867,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.validateDelete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.delete.
@@ -8812,7 +8900,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.addDependencies.
@@ -8845,7 +8933,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.addDependencies', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.deleteDependencies.
@@ -8878,7 +8966,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.deleteDependencies', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.validateAddTimes.
@@ -8911,7 +8999,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.validateAddTimes', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.addTimes.
@@ -8944,7 +9032,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.addTimes', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.getSla.
@@ -8977,7 +9065,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.getSla', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.deleteTimes.
@@ -9010,7 +9098,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.deleteTimes', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.isReadable.
@@ -9043,7 +9131,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.isWritable.
@@ -9076,7 +9164,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.tableName.
@@ -9109,7 +9197,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.pk.
@@ -9142,7 +9230,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method service.pkOption.
@@ -9175,7 +9263,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('service.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.get.
@@ -9208,7 +9296,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.exists.
@@ -9241,7 +9329,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.create.
@@ -9274,7 +9362,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.update.
@@ -9307,7 +9395,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.delete.
@@ -9340,7 +9428,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.tableName.
@@ -9373,7 +9461,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.pk.
@@ -9406,7 +9494,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screen.pkOption.
@@ -9439,7 +9527,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screen.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.get.
@@ -9472,7 +9560,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.create.
@@ -9505,7 +9593,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.update.
@@ -9538,7 +9626,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.updateByPosition.
@@ -9571,7 +9659,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.updateByPosition', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.delete.
@@ -9604,7 +9692,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.isReadable.
@@ -9637,7 +9725,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.isWritable.
@@ -9670,7 +9758,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.tableName.
@@ -9703,7 +9791,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.pk.
@@ -9736,7 +9824,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method screenitem.pkOption.
@@ -9769,7 +9857,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('screenitem.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.get.
@@ -9802,7 +9890,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.create.
@@ -9835,7 +9923,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.update.
@@ -9868,7 +9956,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.delete.
@@ -9901,7 +9989,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.execute.
@@ -9934,7 +10022,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.execute', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.getScriptsByHosts.
@@ -9967,7 +10055,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.getScriptsByHosts', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.tableName.
@@ -10000,7 +10088,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.pk.
@@ -10033,7 +10121,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method script.pkOption.
@@ -10066,7 +10154,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('script.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.pkOption.
@@ -10099,7 +10187,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.get.
@@ -10132,7 +10220,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.getObjects.
@@ -10165,7 +10253,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.exists.
@@ -10198,7 +10286,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.create.
@@ -10231,7 +10319,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.update.
@@ -10264,7 +10352,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.delete.
@@ -10297,7 +10385,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.massAdd.
@@ -10330,7 +10418,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.massAdd', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.massUpdate.
@@ -10363,7 +10451,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.massUpdate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.massRemove.
@@ -10396,7 +10484,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.massRemove', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.isReadable.
@@ -10429,7 +10517,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.isWritable.
@@ -10462,7 +10550,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.tableName.
@@ -10495,7 +10583,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method template.pk.
@@ -10528,7 +10616,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('template.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.get.
@@ -10561,7 +10649,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.exists.
@@ -10594,7 +10682,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.copy.
@@ -10627,7 +10715,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.copy', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.update.
@@ -10660,7 +10748,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.create.
@@ -10693,7 +10781,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.delete.
@@ -10726,7 +10814,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.tableName.
@@ -10759,7 +10847,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.pk.
@@ -10792,7 +10880,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreen.pkOption.
@@ -10825,7 +10913,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreen.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreenitem.get.
@@ -10858,7 +10946,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreenitem.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreenitem.tableName.
@@ -10891,7 +10979,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreenitem.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreenitem.pk.
@@ -10924,7 +11012,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreenitem.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method templatescreenitem.pkOption.
@@ -10957,7 +11045,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('templatescreenitem.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.get.
@@ -10990,7 +11078,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.getObjects.
@@ -11023,7 +11111,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.exists.
@@ -11056,7 +11144,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.checkInput.
@@ -11089,7 +11177,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.checkInput', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.create.
@@ -11122,7 +11210,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.update.
@@ -11155,7 +11243,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.delete.
@@ -11188,7 +11276,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.addDependencies.
@@ -11221,7 +11309,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.addDependencies', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.deleteDependencies.
@@ -11254,7 +11342,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.deleteDependencies', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.syncTemplates.
@@ -11287,7 +11375,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.syncTemplateDependencies.
@@ -11320,7 +11408,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.syncTemplateDependencies', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.isReadable.
@@ -11353,7 +11441,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.isWritable.
@@ -11386,7 +11474,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.tableName.
@@ -11419,7 +11507,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.pk.
@@ -11452,7 +11540,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method trigger.pkOption.
@@ -11485,7 +11573,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('trigger.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.get.
@@ -11518,7 +11606,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.create.
@@ -11551,7 +11639,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.update.
@@ -11584,7 +11672,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.delete.
@@ -11617,7 +11705,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.syncTemplates.
@@ -11650,7 +11738,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.syncTemplates', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.tableName.
@@ -11683,7 +11771,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.pk.
@@ -11716,7 +11804,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method triggerprototype.pkOption.
@@ -11749,7 +11837,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('triggerprototype.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.get.
@@ -11782,7 +11870,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.create.
@@ -11815,7 +11903,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.update.
@@ -11848,7 +11936,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.updateProfile.
@@ -11881,7 +11969,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.updateProfile', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.delete.
@@ -11914,7 +12002,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.addMedia.
@@ -11947,7 +12035,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.addMedia', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.updateMedia.
@@ -11980,7 +12068,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.updateMedia', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.deleteMedia.
@@ -12013,7 +12101,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.deleteMedia', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.deleteMediaReal.
@@ -12046,7 +12134,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.deleteMediaReal', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.checkAuthentication.
@@ -12079,7 +12167,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.checkAuthentication', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.isReadable.
@@ -12112,7 +12200,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.isWritable.
@@ -12145,7 +12233,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.tableName.
@@ -12178,7 +12266,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.pk.
@@ -12211,7 +12299,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method user.pkOption.
@@ -12244,7 +12332,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('user.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.get.
@@ -12277,7 +12365,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.getObjects.
@@ -12310,7 +12398,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.getObjects', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.exists.
@@ -12343,7 +12431,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.exists', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.create.
@@ -12376,7 +12464,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.update.
@@ -12409,7 +12497,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.massAdd.
@@ -12442,7 +12530,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.massAdd', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.massUpdate.
@@ -12475,7 +12563,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.massUpdate', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.delete.
@@ -12508,7 +12596,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.isReadable.
@@ -12541,7 +12629,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.isWritable.
@@ -12574,7 +12662,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.tableName.
@@ -12607,7 +12695,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.pk.
@@ -12640,7 +12728,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usergroup.pkOption.
@@ -12673,7 +12761,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usergroup.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.get.
@@ -12706,7 +12794,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.createGlobal.
@@ -12739,7 +12827,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.createGlobal', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.updateGlobal.
@@ -12772,7 +12860,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.updateGlobal', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.deleteGlobal.
@@ -12805,7 +12893,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.deleteGlobal', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.create.
@@ -12838,7 +12926,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.update.
@@ -12871,7 +12959,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.delete.
@@ -12904,7 +12992,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.replaceMacros.
@@ -12937,7 +13025,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.replaceMacros', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.tableName.
@@ -12970,7 +13058,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.pk.
@@ -13003,7 +13091,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermacro.pkOption.
@@ -13036,7 +13124,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermacro.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermedia.get.
@@ -13069,7 +13157,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermedia.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermedia.tableName.
@@ -13102,7 +13190,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermedia.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermedia.pk.
@@ -13135,7 +13223,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermedia.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method usermedia.pkOption.
@@ -13168,7 +13256,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('usermedia.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.get.
@@ -13201,7 +13289,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.get', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.create.
@@ -13234,7 +13322,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.create', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.update.
@@ -13267,7 +13355,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.update', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.delete.
@@ -13300,7 +13388,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.delete', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.isReadable.
@@ -13333,7 +13421,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.isReadable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.isWritable.
@@ -13366,7 +13454,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.isWritable', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.tableName.
@@ -13399,7 +13487,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.tableName', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.pk.
@@ -13432,7 +13520,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.pk', $params, $arrayKeyProperty, $auth);
     }
-    
+
     /**
      * @brief   Reqeusts the Zabbix API and returns the response of the API
      *          method httptest.pkOption.
@@ -13465,7 +13553,7 @@ abstract class ZabbixApiAbstract
         // request
         return $this->request('httptest.pkOption', $params, $arrayKeyProperty, $auth);
     }
-    
+
 
 }
 
