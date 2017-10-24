@@ -490,7 +490,7 @@ abstract class ZabbixApiAbstract
      * @throws  Exception
      */
 
-    final public function userLogin($params=array(), $arrayKeyProperty='', $tokenCacheDir='/tmp')
+    final public function userLogin($params=array(), $arrayKeyProperty='')
     {
         // reset auth token
         $this->authToken = '';
@@ -498,12 +498,14 @@ abstract class ZabbixApiAbstract
         $zabbixId = $params['zabbix-id'];
         $tokenKeyName = $zabbixId . '-auth-token';
 
-        // build filename for cached auth token
-        //if($tokenCacheDir && array_key_exists('user', $params) && is_dir($tokenCacheDir))
-        //    $tokenCacheFile = $tokenCacheDir.'/.zabbixapi-token-'.md5($params['user'].'|'.posix_getuid());
+        $useCache = true;
+        if (!$useCache) {
+            $params          = $this->getRequestParamsArray($params);
+            $this->authToken = $this->request('user.login', $params, $arrayKeyProperty, FALSE);
 
-        // try to read cached auth token
-        //if(isset($tokenCacheFile) && is_file($tokenCacheFile))
+            return $this->authToken;
+        }
+
         if (Cache::has($tokenKeyName)) {
             try
             {
