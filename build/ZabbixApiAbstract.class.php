@@ -204,6 +204,14 @@ abstract class ZabbixApiAbstract
     }
 
     /**
+     * @return mixed
+     */
+    public function getAuthToken()
+    {
+        return $this->authToken;
+    }
+
+    /**
      * @brief   Sets the username and password for the HTTP basic authorization.
      *
      * @param   $user       HTTP basic authorization username
