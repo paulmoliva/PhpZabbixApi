@@ -336,7 +336,8 @@ abstract class ZabbixApiAbstract
             'http' => array(
                 'method'  => 'POST',
                 'header'  => 'Content-type: application/json-rpc'."\r\n".$this->extraHeaders,
-                'content' => $this->requestEncoded
+                'content' => $this->requestEncoded,
+                'timeout' => 120
             )
         );
         if($this->sslContext)
