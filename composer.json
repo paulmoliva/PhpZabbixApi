@@ -1,6 +1,6 @@
 {
     "name": "llnw/php-zabbix-api",
-    "version": "2.4.6",
+    "version": "2.4.7",
     "type": "library",
     "description": "PhpZabbixApi library",
     "keywords": ["zabbix","api"],
