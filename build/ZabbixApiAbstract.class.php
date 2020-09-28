@@ -366,7 +366,7 @@ abstract class ZabbixApiAbstract
 
         // validate response
         if(!is_object($this->responseDecoded) && !is_array($this->responseDecoded))
-            throw new Exception('Could not decode JSON response.');
+            throw new Exception('Could not decode ' . $this->responseDecoded);
         if(array_key_exists('error', $this->responseDecoded))
             throw new Exception('API error '.$this->responseDecoded->error->code.': '.$this->responseDecoded->error->data);
 
